@@ -2,7 +2,8 @@ return {
   "xiyaowong/transparent.nvim",
   lazy = false,
   config = function()
-    require("transparent").setup({
+    local transparent = require("transparent")
+    transparent.setup({
       -- table: default groups
       groups = {
         "Normal",
@@ -34,13 +35,13 @@ return {
       -- table: additional groups that should be cleared
       extra_groups = {
         "NormalFloat", -- plugins which have float panel such as Lazy, Mason, LspInfo
-        "NvimTreeNormal", -- NvimTree
       },
       -- table: groups you don't want to clear
       exclude_groups = {},
-      -- function: code to be executed after highlight groups are cleared
-      -- Also the user event "TransparentClear" will be triggered
-      on_clear = function() end,
     })
+
+    -- 使用 clear_prefix 清除所有 BufferLine 和 NeoTree 开头的高亮组
+    transparent.clear_prefix("BufferLine")
+    transparent.clear_prefix("NeoTree")
   end,
 }
