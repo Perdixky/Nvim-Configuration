@@ -53,8 +53,6 @@ local function setup_insert_navigation()
       silent = true,
     })
   end
-
-  print("✅ 插入模式导航键设置完成")
 end
 
 -- 立即执行
