@@ -86,11 +86,111 @@ local function find_system_clangd()
   end
 end
 
+local function normalize_cmd(cmd)
+  if type(cmd) == "string" then
+    return { cmd }
+  end
+  if type(cmd) ~= "table" then
+    return { "clangd" }
+  end
+  return vim.deepcopy(cmd)
+end
+
+local function build_clangd_cmd(base_cmd, root_dir)
+  local cmd = normalize_cmd(base_cmd)
+  local filtered = {}
+
+  for _, arg in ipairs(cmd) do
+    if type(arg) == "string" and not arg:match("^%-%-compile%-commands%-dir") then
+      filtered[#filtered + 1] = arg
+    end
+  end
+
+  if root_dir and root_dir ~= "" then
+    filtered[#filtered + 1] = "--compile-commands-dir=" .. root_dir
+  end
+
+  return filtered
+end
+
+local last_clangd_root = nil
+
+local function resolve_clangd_root(bufnr, markers)
+  local root = vim.fs.root(bufnr, markers or {})
+  if root and root ~= "" then
+    last_clangd_root = root
+    return root
+  end
+
+  local clients = vim.lsp.get_clients({ name = "clangd" })
+  for _, client in ipairs(clients) do
+    if client.root_dir and client.root_dir ~= "" then
+      last_clangd_root = client.root_dir
+      return client.root_dir
+    end
+  end
+
+  return last_clangd_root
+end
+
 return {
   {
     "neovim/nvim-lspconfig",
     opts = function(_, opts)
-      opts = opts or {}
+      local base_opts = {
+        servers = {
+          -- Ensure mason installs the server
+          clangd = {
+            keys = {
+              { "<leader>ch", "<cmd>LspClangdSwitchSourceHeader<cr>", desc = "Switch Source/Header (C/C++)" },
+            },
+            root_markers = {
+              "compile_commands.json",
+              "compile_flags.txt",
+              "configure.ac", -- AutoTools
+              "Makefile",
+              "configure.ac",
+              "configure.in",
+              "config.h.in",
+              "meson.build",
+              "meson_options.txt",
+              "build.ninja",
+              ".git",
+            },
+            capabilities = {
+              offsetEncoding = { "utf-16" },
+            },
+            cmd = {
+              "clangd",
+              "--background-index",
+              "--clang-tidy",
+              "--header-insertion=iwyu",
+              "--completion-style=detailed",
+              "--fallback-style=llvm",
+            },
+            init_options = {
+              usePlaceholders = true,
+              completeUnimported = true,
+              clangdFileStatus = true,
+            },
+          },
+        },
+        setup = {
+          clangd = function(_, opts)
+            local clangd_ext_opts = LazyVim.opts("clangd_extensions.nvim")
+            require("clangd_extensions").setup(vim.tbl_deep_extend("force", clangd_ext_opts or {}, { server = opts }))
+            return false
+          end,
+        },
+      }
+
+      opts = vim.tbl_deep_extend("force", base_opts, opts or {})
+
+      local clangd_markers = opts.servers.clangd.root_markers
+      opts.servers.clangd.root_dir = function(bufnr, on_dir)
+        on_dir(resolve_clangd_root(bufnr, clangd_markers))
+      end
+
       local system_clangd = find_system_clangd()
 
       opts.servers = opts.servers or {}
@@ -123,7 +223,50 @@ return {
         opts.servers.clangd.cmd_env.PATH = opts.servers.clangd.cmd_env.PATH or vim.env.PATH
       end
 
+      opts.servers.clangd._base_cmd = vim.deepcopy(opts.servers.clangd.cmd)
+      opts.servers.clangd.cmd = function(dispatchers, config)
+        local base_cmd = config._base_cmd
+        local resolved_cmd = build_clangd_cmd(base_cmd, config.root_dir)
+        config.cmd = resolved_cmd
+        return vim.lsp.rpc.start(resolved_cmd, dispatchers, {
+          cwd = config.cmd_cwd,
+          env = config.cmd_env,
+          detached = config.detached,
+        })
+      end
+
       return opts
     end,
+  },
+
+  {
+    "p00f/clangd_extensions.nvim",
+    lazy = true,
+    config = function() end,
+    opts = {
+      inlay_hints = {
+        inline = false,
+      },
+      ast = {
+        --These require codicons (https://github.com/microsoft/vscode-codicons)
+        role_icons = {
+          type = "",
+          declaration = "",
+          expression = "",
+          specifier = "",
+          statement = "",
+          ["template argument"] = "",
+        },
+        kind_icons = {
+          Compound = "",
+          Recovery = "",
+          TranslationUnit = "",
+          PackExpansion = "",
+          TemplateTypeParm = "",
+          TemplateTemplateParm = "",
+          TemplateParamObject = "",
+        },
+      },
+    },
   },
 }
